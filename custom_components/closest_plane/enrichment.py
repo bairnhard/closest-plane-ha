@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import aiohttp
@@ -113,7 +113,7 @@ def _minutes_until(iso: str | None) -> int | None:
         return None
     try:
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-        diff = (dt - datetime.now(datetime.UTC)).total_seconds()
+        diff = (dt - datetime.now(timezone.utc)).total_seconds()
         return max(0, round(diff / 60))
     except Exception:
         return None
@@ -121,7 +121,7 @@ def _minutes_until(iso: str | None) -> int | None:
 
 def _route_cache_keys(flight_number: str | None, callsign: str | None) -> list[str]:
     identifiers = list(dict.fromkeys(x for x in [flight_number, callsign] if x))
-    today = datetime.now(datetime.UTC).strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     keys = []
     for ident in identifiers:
         keys.append(f"{ident}-{today}")
@@ -330,7 +330,7 @@ def _derive_timing(aircraft: dict) -> dict:
     if departed_at and aircraft.get("elapsed_minutes") is None:
         try:
             dep_dt = datetime.fromisoformat(departed_at.replace("Z", "+00:00"))
-            elapsed = round((datetime.now(datetime.UTC) - dep_dt).total_seconds() / 60)
+            elapsed = round((datetime.now(timezone.utc) - dep_dt).total_seconds() / 60)
             if elapsed > 0:
                 aircraft["elapsed_minutes"] = elapsed
         except Exception:
