@@ -1,0 +1,126 @@
+# Closest Plane — Home Assistant Integration
+
+A Home Assistant custom component that finds the nearest airborne aircraft to your location and exposes it as a set of sensors. Self-contained Python — does not require the Node.js closest-plane-app to be running.
+
+## What it does
+
+Every N minutes (configurable), the integration:
+
+1. Queries OpenSky Network for aircraft within your configured radius
+2. Picks the closest airborne aircraft
+3. Enriches it via ADSBDB (aircraft identity, typical route) and optionally AeroDataBox (live departure/destination)
+4. Exposes the result as Home Assistant sensor entities
+
+## Sensors
+
+| Entity | Example value | Notes |
+|---|---|---|
+| `sensor.closest_plane_callsign` | `EXS18QH` | Raw transponder callsign; also carries full route data as attributes |
+| `sensor.closest_plane_flight_number` | `LS1728` | Normalised IATA flight number |
+| `sensor.closest_plane_airline` | `Jet2.com` | |
+| `sensor.closest_plane_departure` | `AYT - Antalya Airport` | |
+| `sensor.closest_plane_destination` | `MAN - Manchester Airport` | |
+| `sensor.closest_plane_registration` | `G-SUNU` | |
+| `sensor.closest_plane_aircraft_type` | `A21N` | ICAO type code |
+| `sensor.closest_plane_aircraft_model` | `Airbus A321-251NX` | |
+| `sensor.closest_plane_distance_km` | `16.15` | km |
+| `sensor.closest_plane_altitude_ft` | `37225` | ft |
+| `sensor.closest_plane_speed_knots` | `435` | kn |
+| `sensor.closest_plane_heading` | `304` | degrees |
+| `sensor.closest_plane_vertical_rate_fpm` | `0` | ft/min |
+| `sensor.closest_plane_remaining_minutes` | `92` | minutes to destination |
+| `sensor.closest_plane_elapsed_minutes` | `169` | minutes since departure |
+| `sensor.closest_plane_icao24` | `40825f` | Mode S transponder hex |
+| `sensor.closest_plane_origin_country` | `United Kingdom` | |
+| `sensor.closest_plane_squawk` | `3120` | |
+
+The `callsign` sensor carries extended attributes: departure/destination airport objects, scheduled/actual/estimated times, total flight minutes, position, confidence scores, and enrichment sources.
+
+## Installation
+
+### HACS (recommended)
+
+1. Open HACS → Integrations → three-dot menu → Custom repositories
+2. Add `https://github.com/bairnhard/closest-plane-ha` as category **Integration**
+3. Install **Closest Plane**, restart Home Assistant
+
+### Manual
+
+```bash
+cp -r custom_components/closest_plane /config/custom_components/
+```
+
+Restart Home Assistant, then add the integration via **Settings → Devices & Services → Add Integration → Closest Plane**.
+
+## Configuration
+
+**Step 1 — Location & radius**
+
+| Field | Default | Description |
+|---|---|---|
+| Latitude | HA home | Centre of search area |
+| Longitude | HA home | Centre of search area |
+| Search radius | 180 km | Max 500 km |
+| Refresh interval | 2 min | Min 1 min |
+
+**Step 2 — API keys (all optional)**
+
+| Field | Description |
+|---|---|
+| OpenSky client ID / secret | OAuth credentials for higher rate limits. Create at [opensky-network.org](https://opensky-network.org/). Without these, anonymous access is used (more restrictive). |
+| AeroDataBox RapidAPI key | Enables live departure/destination data (~5 min lag). Free tier: 500 calls/day. Get at [rapidapi.com](https://rapidapi.com/) → search AeroDataBox. |
+| Manual cache directory | Absolute path to a `.cache` directory in the same format as [closest-plane-app](https://github.com/bairnhard/closest-plane-app). Allows sharing manual flight and aircraft overrides between the two tools. |
+
+## Data sources and priority
+
+Route data priority (highest wins):
+
+1. **Manual flight cache** (`flight-cache.json`) — user-verified ground truth
+2. **AeroDataBox** — live data, ~5 min lag
+3. **ADSBDB** — typical/historical route for known callsigns
+4. **No route** — sensors show `None`/unavailable
+
+Aircraft identity priority:
+
+1. **Manual aircraft cache** (`aircraft-cache.json`)
+2. **ADSBDB** — registration, type, model, operator
+3. **AeroDataBox** — registration fallback
+
+## Honest data boundary
+
+OpenSky live state vectors do not contain departure/destination. These fields are only populated from ADSBDB, AeroDataBox, or manual caches. When unknown, the relevant sensors are unavailable rather than showing guessed data.
+
+## Automation example
+
+```yaml
+automation:
+  - alias: "Interesting aircraft overhead"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.closest_plane_distance_km
+        below: 20
+        above: 0
+    condition:
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: sensor.closest_plane_airline
+            state: unavailable
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "Aircraft overhead"
+          message: >
+            {{ states('sensor.closest_plane_flight_number') }}
+            ({{ states('sensor.closest_plane_airline') }})
+            {{ states('sensor.closest_plane_distance_km') }} km away at
+            {{ states('sensor.closest_plane_altitude_ft') }} ft.
+            {% if states('sensor.closest_plane_departure') != 'unavailable' %}
+            {{ states('sensor.closest_plane_departure') }} →
+            {{ states('sensor.closest_plane_destination') }}
+            {% endif %}
+```
+
+## Relation to closest-plane-app
+
+This integration is a self-contained Python reimplementation of the data pipeline from [closest-plane-app](https://github.com/bairnhard/closest-plane-app). The two share the same JSON cache file format — if you run both on the same machine, point `cache_dir` at the Node.js app's `.cache` directory to share manual enrichment entries.
