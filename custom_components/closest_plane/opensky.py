@@ -162,6 +162,8 @@ def _parse_state(row: list, user_lat: float, user_lon: float) -> dict[str, Any] 
         "elapsed_minutes": None,
         "remaining_minutes": None,
         "total_minutes": None,
+        "departure_time": None,
+        "arrival_time": None,
         "airline_logo_url": None,
         "confidence": {
             "identity": 0.88 if identity["airline"] else (0.55 if identity["callsign"] else 0),

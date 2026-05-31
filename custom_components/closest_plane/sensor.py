@@ -164,6 +164,20 @@ SENSORS: tuple[ClosestPlaneSensorDescription, ...] = (
         icon="mdi:image",
     ),
     ClosestPlaneSensorDescription(
+        key="departure_time",
+        data_key="departure_time",
+        name="Departure time",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:airplane-takeoff",
+    ),
+    ClosestPlaneSensorDescription(
+        key="arrival_time",
+        data_key="arrival_time",
+        name="Arrival time",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:airplane-landing",
+    ),
+    ClosestPlaneSensorDescription(
         key="scheduled_departure",
         data_key="scheduled_departure",
         name="Scheduled departure",

@@ -1,4 +1,4 @@
-"""Enrichment pipeline: ADSBDB, AeroDataBox, local JSON caches."""
+"""Enrichment pipeline: ADSBDB, AeroDataBox, AviationStack, local JSON caches, OpenSky flights."""
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +11,7 @@ from typing import Any
 
 import aiohttp
 
-from .const import ADSBDB_API, AERODATABOX_API
+from .const import ADSBDB_API, AERODATABOX_API, AVIATIONSTACK_API, OPENSKY_API
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,10 +74,31 @@ def _normalize_aerodatabox_airport(a: dict | None) -> dict | None:
     }
 
 
+def _normalize_aviationstack_airport(a: dict | None) -> dict | None:
+    if not a:
+        return None
+    return {
+        "icao": a.get("icao"),
+        "iata": a.get("iata"),
+        "name": a.get("airport"),
+    }
+
+
 def _parse_time(obj: dict | None) -> str | None:
+    """Parse a time dict with 'utc'/'local' keys (AeroDataBox format)."""
     if not obj:
         return None
     raw = obj.get("utc") or obj.get("local")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).isoformat()
+    except Exception:
+        return raw
+
+
+def _parse_iso(raw: str | None) -> str | None:
+    """Parse a plain ISO 8601 string (AviationStack format)."""
     if not raw:
         return None
     try:
@@ -156,6 +177,43 @@ def _apply_flight_cache(aircraft: dict, hit: dict) -> dict:
         aircraft["confidence"].get("identity", 0), hit.get("identityConfidence", conf)
     )
     aircraft["sources"].append(f"local.flight-cache:{hit.get('source', 'manual')}")
+    return aircraft
+
+
+def _apply_aviationstack(aircraft: dict, flight: dict) -> dict:
+    dep_info = flight.get("departure") or {}
+    arr_info = flight.get("arrival") or {}
+
+    dep_airport = _normalize_aviationstack_airport(dep_info)
+    arr_airport = _normalize_aviationstack_airport(arr_info)
+
+    if dep_airport and dep_airport.get("iata"):
+        aircraft["departure_airport"] = dep_airport
+        aircraft["departure"] = _display_airport(dep_airport)
+        aircraft["scheduled_departure"] = (
+            aircraft.get("scheduled_departure") or _parse_iso(dep_info.get("scheduled"))
+        )
+        actual = _parse_iso(dep_info.get("actual") or dep_info.get("actual_runway"))
+        if actual:
+            aircraft["actual_departure"] = actual
+
+    if arr_airport and arr_airport.get("iata"):
+        aircraft["destination_airport"] = arr_airport
+        aircraft["destination"] = _display_airport(arr_airport)
+        aircraft["scheduled_arrival"] = (
+            aircraft.get("scheduled_arrival") or _parse_iso(arr_info.get("scheduled"))
+        )
+        estimated = _parse_iso(arr_info.get("estimated") or arr_info.get("estimated_runway"))
+        if estimated:
+            aircraft["estimated_arrival"] = estimated
+
+    airl = flight.get("airline") or {}
+    aircraft["airline"] = aircraft.get("airline") or airl.get("name")
+    aircraft["airline_icao"] = aircraft.get("airline_icao") or airl.get("icao")
+    aircraft["airline_iata"] = aircraft.get("airline_iata") or airl.get("iata")
+
+    aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.92)
+    aircraft["sources"].append("aviationstack")
     return aircraft
 
 
@@ -240,6 +298,72 @@ async def _aerodatabox(
     return None
 
 
+async def _aviationstack(
+    session: aiohttp.ClientSession, flight_number: str, api_key: str
+) -> dict | None:
+    iata_flight = flight_number.replace(" ", "")
+    key = f"aviationstack:{iata_flight}"
+    cached = _get(key)
+    if cached is not None:
+        return cached
+    try:
+        async with asyncio.timeout(5):
+            async with session.get(
+                f"{AVIATIONSTACK_API}/flights",
+                params={"access_key": api_key, "flight_iata": iata_flight},
+            ) as resp:
+                if resp.status == 429:
+                    return _put(key, None, 900)
+                if not resp.ok:
+                    return _put(key, None, 300)
+                data = await resp.json()
+                flights = (data or {}).get("data") or []
+                # Prefer active/en-route, fall back to most recent
+                active = next(
+                    (f for f in flights if f.get("flight_status") in ("active", "landed")),
+                    flights[0] if flights else None,
+                )
+                return _put(key, active, 120)
+    except Exception as err:
+        _LOGGER.debug("AviationStack error: %s", err)
+    return None
+
+
+async def _opensky_flights(
+    session: aiohttp.ClientSession, icao24: str, config: dict
+) -> dict | None:
+    """Last-resort: OpenSky historical flights — gives departure/arrival airports only, no live times."""
+    key = f"opensky_flights:{icao24.lower()}"
+    cached = _get(key)
+    if cached is not None:
+        return cached
+
+    now = int(time.time())
+    params = {"icao24": icao24.lower(), "begin": now - 86400, "end": now}
+
+    client_id = config.get("opensky_client_id", "")
+    client_secret = config.get("opensky_client_secret", "")
+    auth = aiohttp.BasicAuth(client_id, client_secret) if client_id and client_secret else None
+
+    try:
+        async with asyncio.timeout(5):
+            async with session.get(
+                f"{OPENSKY_API}/flights/aircraft",
+                params=params,
+                auth=auth,
+            ) as resp:
+                if not resp.ok:
+                    return _put(key, None, 3600)
+                flights = await resp.json()
+                if not flights:
+                    return _put(key, None, 3600)
+                latest = max(flights, key=lambda f: f.get("lastSeen", 0))
+                return _put(key, latest, 3600)
+    except Exception as err:
+        _LOGGER.debug("OpenSky flights error: %s", err)
+    return None
+
+
 async def enrich_aircraft(
     session: aiohttp.ClientSession,
     aircraft: dict[str, Any],
@@ -284,7 +408,14 @@ async def enrich_aircraft(
             aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.72)
             aircraft["sources"].append("adsbdb.callsign")
 
-    # 2. AeroDataBox — live route (overrides ADSBDB)
+    # 2. AviationStack — live route by flight number (free tier, 1000 calls/month)
+    avs_key = config.get("aviationstack_api_key", "")
+    if avs_key and aircraft.get("flight_number"):
+        flight = await _aviationstack(session, aircraft["flight_number"], avs_key)
+        if flight:
+            aircraft = _apply_aviationstack(aircraft, flight)
+
+    # 3. AeroDataBox — live route by ICAO24 (paid, overrides earlier data)
     adb_key = config.get("aerodatabox_api_key", "")
     if adb_key:
         flight = await _aerodatabox(session, icao24, adb_key)
@@ -310,10 +441,10 @@ async def enrich_aircraft(
             if (flight.get("aircraft") or {}).get("reg"):
                 aircraft["registration"] = aircraft["registration"] or flight["aircraft"]["reg"]
             if dep_airport or dst_airport:
-                aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.9)
+                aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.95)
                 aircraft["sources"].append("aerodatabox")
 
-    # 3 & 4. Local JSON caches (compatible with closest-plane-app format)
+    # 4. Local JSON caches (compatible with closest-plane-app format)
     cache_dir = config.get("cache_dir", "")
     if cache_dir and os.path.isdir(cache_dir):
         ac_cache = _load_json(os.path.join(cache_dir, "aircraft-cache.json"))
@@ -334,7 +465,23 @@ async def enrich_aircraft(
                 aircraft = _apply_flight_cache(aircraft, fl_cache[ck])
                 break
 
-    # 5. Derive timing from timestamps when enrichment didn't supply them
+    # 5. OpenSky flights — last resort: ICAO airports only, historical data
+    if not aircraft.get("departure_airport") and not aircraft.get("destination_airport"):
+        os_flight = await _opensky_flights(session, icao24, config)
+        if os_flight:
+            dep_icao = os_flight.get("estDepartureAirport")
+            arr_icao = os_flight.get("estArrivalAirport")
+            if dep_icao:
+                aircraft["departure_airport"] = {"icao": dep_icao}
+                aircraft["departure"] = dep_icao
+            if arr_icao:
+                aircraft["destination_airport"] = {"icao": arr_icao}
+                aircraft["destination"] = arr_icao
+            if dep_icao or arr_icao:
+                aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.4)
+                aircraft["sources"].append("opensky.flights")
+
+    # 6. Derive timing from timestamps when enrichment didn't supply them
     departed_at = aircraft.get("actual_departure") or aircraft.get("scheduled_departure")
     if departed_at and aircraft.get("elapsed_minutes") is None:
         try:
@@ -362,11 +509,25 @@ async def enrich_aircraft(
             aircraft.get("estimated_arrival") or aircraft.get("scheduled_arrival")
         )
 
-    # Derive airline logo URL from IATA code
-    iata = aircraft.get("airline_iata")
-    if iata and not aircraft.get("airline_logo_url"):
-        aircraft["airline_logo_url"] = (
-            f"https://content.airhex.com/content/logos/airlines_{iata}_100_50_r.png"
-        )
+    # Best-available departure/arrival: actual > scheduled
+    aircraft["departure_time"] = (
+        aircraft.get("actual_departure") or aircraft.get("scheduled_departure")
+    )
+    aircraft["arrival_time"] = (
+        aircraft.get("estimated_arrival") or aircraft.get("scheduled_arrival")
+    )
+
+    # Airline logo — IATA preferred (Kiwi.com), ICAO as fallback
+    if not aircraft.get("airline_logo_url"):
+        iata = aircraft.get("airline_iata")
+        icao = aircraft.get("airline_icao")
+        if iata:
+            aircraft["airline_logo_url"] = (
+                f"https://images.kiwi.com/airlines/64/{iata}.png"
+            )
+        elif icao:
+            aircraft["airline_logo_url"] = (
+                f"https://images.kiwi.com/airlines/64/{icao}.png"
+            )
 
     return aircraft

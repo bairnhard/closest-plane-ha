@@ -13,10 +13,11 @@
       },
       "apis": {
         "title": "API keys (optional)",
-        "description": "All fields are optional. OpenSky OAuth increases rate limits. AeroDataBox provides live departure/destination data. Cache dir must be the .cache path from closest-plane-app if you want to share manual overrides.",
+        "description": "All fields are optional. OpenSky OAuth increases rate limits. AviationStack provides live departure/arrival times (free tier: 1000 calls/month). AeroDataBox (RapidAPI) provides live route data by ICAO24. Cache dir shares manual overrides from closest-plane-app.",
         "data": {
           "opensky_client_id": "OpenSky client ID",
           "opensky_client_secret": "OpenSky client secret",
+          "aviationstack_api_key": "AviationStack API key",
           "aerodatabox_api_key": "AeroDataBox RapidAPI key",
           "cache_dir": "Manual cache directory path"
         }

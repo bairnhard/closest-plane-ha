@@ -10,6 +10,7 @@ import homeassistant.helpers.config_validation as cv
 
 from .const import (
     CONF_AERODATABOX_API_KEY,
+    CONF_AVIATIONSTACK_API_KEY,
     CONF_CACHE_DIR,
     CONF_LATITUDE,
     CONF_LONGITUDE,
@@ -66,6 +67,7 @@ class ClosestPlaneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             for key in (
                 CONF_OPENSKY_CLIENT_ID,
                 CONF_OPENSKY_CLIENT_SECRET,
+                CONF_AVIATIONSTACK_API_KEY,
                 CONF_AERODATABOX_API_KEY,
                 CONF_CACHE_DIR,
             ):
@@ -77,6 +79,7 @@ class ClosestPlaneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Optional(CONF_OPENSKY_CLIENT_ID, default=""): str,
                 vol.Optional(CONF_OPENSKY_CLIENT_SECRET, default=""): str,
+                vol.Optional(CONF_AVIATIONSTACK_API_KEY, default=""): str,
                 vol.Optional(CONF_AERODATABOX_API_KEY, default=""): str,
                 vol.Optional(CONF_CACHE_DIR, default=""): str,
             }

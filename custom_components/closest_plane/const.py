@@ -11,6 +11,7 @@ CONF_REFRESH_MINUTES = "refresh_minutes"
 CONF_OPENSKY_CLIENT_ID = "opensky_client_id"
 CONF_OPENSKY_CLIENT_SECRET = "opensky_client_secret"
 CONF_AERODATABOX_API_KEY = "aerodatabox_api_key"
+CONF_AVIATIONSTACK_API_KEY = "aviationstack_api_key"
 CONF_CACHE_DIR = "cache_dir"
 
 DEFAULT_RADIUS_KM = 180
@@ -23,6 +24,7 @@ OPENSKY_TOKEN_URL = (
 )
 ADSBDB_API = "https://api.adsbdb.com/v0"
 AERODATABOX_API = "https://aerodatabox.p.rapidapi.com"
+AVIATIONSTACK_API = "https://api.aviationstack.com/v1"
 
 AIRLINES: dict[str, dict] = {
     "SAS": {"name": "Scandinavian Airlines", "iata": "SK"},
@@ -63,6 +65,23 @@ AIRLINES: dict[str, dict] = {
     "FDX": {"name": "FedEx Express", "iata": "FX"},
     "UPS": {"name": "UPS Airlines", "iata": "5X"},
     "BFD": {"name": "Bertelsmann Media Jet", "iata": None},
+    # German/Austrian/Swiss cargo & charter
+    "GEC": {"name": "Lufthansa Cargo", "iata": "LH"},
+    "AHO": {"name": "Air Hamburg", "iata": None},
+    "HHN": {"name": "Hahn Air", "iata": "HR"},
+    "SCX": {"name": "Sun Country Airlines", "iata": "SY"},
+    # Rescue / EMS helicopter operators
+    "CHX": {"name": "DRF Luftrettung (Christoph)", "iata": None},
+    "ADR": {"name": "ADAC Luftrettung", "iata": None},
+    "RHB": {"name": "ÖAMTC Flugrettung", "iata": None},
+    "HEM": {"name": "Heli-Medico (Swiss Air-Rescue)", "iata": None},
+    "REA": {"name": "Rega (Swiss Air-Rescue)", "iata": None},
+    "HTM": {"name": "HTM Helicopters (Netherlands)", "iata": None},
+    "NHV": {"name": "NHV (North Sea Helicopters)", "iata": None},
+    "SHT": {"name": "Bristow Helicopters", "iata": None},
+    # German Police / Federal agencies
+    "DPO": {"name": "German Federal Police Aviation", "iata": None},
+    "BGS": {"name": "German Federal Police", "iata": None},
 }
 
 IATA_TO_ICAO: dict[str, str] = {
