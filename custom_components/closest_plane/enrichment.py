@@ -323,7 +323,7 @@ async def _aviationstack(
                     (f for f in flights if f.get("flight_status") in ("active", "landed")),
                     flights[0] if flights else None,
                 )
-                return _put(key, active, 120)
+                return _put(key, active, 10800)
     except Exception as err:
         _LOGGER.debug("AviationStack error: %s", err)
     return None
@@ -408,14 +408,7 @@ async def enrich_aircraft(
             aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.72)
             aircraft["sources"].append("adsbdb.callsign")
 
-    # 2. AviationStack — live route by flight number (free tier, 1000 calls/month)
-    avs_key = config.get("aviationstack_api_key", "")
-    if avs_key and aircraft.get("flight_number"):
-        flight = await _aviationstack(session, aircraft["flight_number"], avs_key)
-        if flight:
-            aircraft = _apply_aviationstack(aircraft, flight)
-
-    # 3. AeroDataBox — live route by ICAO24 (paid, overrides earlier data)
+    # 2. AeroDataBox — live route by ICAO24 (paid, highest quality)
     adb_key = config.get("aerodatabox_api_key", "")
     if adb_key:
         flight = await _aerodatabox(session, icao24, adb_key)
@@ -443,6 +436,17 @@ async def enrich_aircraft(
             if dep_airport or dst_airport:
                 aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.95)
                 aircraft["sources"].append("aerodatabox")
+
+    # 3. AviationStack — live route by flight number (free tier, 1000 calls/month)
+    # Only called when we still lack departure/arrival time data after AeroDataBox.
+    # Cache TTL is 3 hours, so the same flight number re-uses the cached result across
+    # many refresh cycles instead of burning API quota on every poll.
+    avs_key = config.get("aviationstack_api_key", "")
+    has_times = aircraft.get("scheduled_departure") or aircraft.get("scheduled_arrival")
+    if avs_key and aircraft.get("flight_number") and not has_times:
+        flight = await _aviationstack(session, aircraft["flight_number"], avs_key)
+        if flight:
+            aircraft = _apply_aviationstack(aircraft, flight)
 
     # 4. Local JSON caches (compatible with closest-plane-app format)
     cache_dir = config.get("cache_dir", "")

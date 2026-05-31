@@ -8,7 +8,7 @@ Every N minutes (configurable), the integration:
 
 1. Queries OpenSky Network for aircraft within your configured radius
 2. Picks the closest airborne aircraft
-3. Enriches it via ADSBDB (aircraft identity, typical route) and optionally AeroDataBox (live departure/destination)
+3. Enriches it via ADSBDB (aircraft identity, typical route), AeroDataBox and/or AviationStack (live departure/destination and times)
 4. Exposes the result as Home Assistant sensor entities
 
 ## Sensors
@@ -16,10 +16,17 @@ Every N minutes (configurable), the integration:
 | Entity | Example value | Notes |
 |---|---|---|
 | `sensor.closest_plane_callsign` | `EXS18QH` | Raw transponder callsign; also carries full route data as attributes |
-| `sensor.closest_plane_flight_number` | `LS1728` | Normalised IATA flight number |
+| `sensor.closest_plane_flight_number` | `LS 1728` | Normalised IATA flight number |
 | `sensor.closest_plane_airline` | `Jet2.com` | |
+| `sensor.closest_plane_airline_logo_url` | `https://images.kiwi.com/…` | Airline logo URL for use in dashboard cards |
 | `sensor.closest_plane_departure` | `AYT - Antalya Airport` | |
 | `sensor.closest_plane_destination` | `MAN - Manchester Airport` | |
+| `sensor.closest_plane_departure_time` | `2024-05-31T09:30:00+00:00` | Actual departure if known, otherwise scheduled |
+| `sensor.closest_plane_arrival_time` | `2024-05-31T12:15:00+00:00` | Estimated arrival if known, otherwise scheduled |
+| `sensor.closest_plane_scheduled_departure` | `2024-05-31T09:15:00+00:00` | |
+| `sensor.closest_plane_actual_departure` | `2024-05-31T09:30:00+00:00` | |
+| `sensor.closest_plane_scheduled_arrival` | `2024-05-31T12:00:00+00:00` | |
+| `sensor.closest_plane_estimated_arrival` | `2024-05-31T12:15:00+00:00` | |
 | `sensor.closest_plane_registration` | `G-SUNU` | |
 | `sensor.closest_plane_aircraft_type` | `A21N` | ICAO type code |
 | `sensor.closest_plane_aircraft_model` | `Airbus A321-251NX` | |
@@ -35,6 +42,25 @@ Every N minutes (configurable), the integration:
 | `sensor.closest_plane_squawk` | `3120` | |
 
 The `callsign` sensor carries extended attributes: departure/destination airport objects, scheduled/actual/estimated times, total flight minutes, position, confidence scores, and enrichment sources.
+
+## Dashboard card
+
+Add a **Markdown card** to your dashboard with the following content:
+
+```yaml
+type: markdown
+content: >
+  {% set logo = states('sensor.closest_plane_airline_logo_url') %}
+  {% if logo not in ('unknown', 'unavailable', '') %}
+  <img src="{{ logo }}" height="40"/>
+  {% endif %}
+
+  {{ states('sensor.closest_plane_airline') }} | {{ states('sensor.closest_plane_aircraft_model') }}
+
+  ✈ {{ states('sensor.closest_plane_departure') }} → {{ states('sensor.closest_plane_destination') }}
+
+  Alt: {{ states('sensor.closest_plane_altitude_ft') }} ft | Spd: {{ states('sensor.closest_plane_speed_knots') }} kn | Hdg: {{ states('sensor.closest_plane_heading') }}° | Vert: {{ states('sensor.closest_plane_vertical_rate_fpm') }} ft/min
+```
 
 ## Installation
 
@@ -68,27 +94,29 @@ Restart Home Assistant, then add the integration via **Settings → Devices & Se
 | Field | Description |
 |---|---|
 | OpenSky client ID / secret | OAuth credentials for higher rate limits. Create at [opensky-network.org](https://opensky-network.org/). Without these, anonymous access is used (more restrictive). |
-| AeroDataBox RapidAPI key | Enables live departure/destination data (~5 min lag). Free tier: 500 calls/day. Get at [rapidapi.com](https://rapidapi.com/) → search AeroDataBox. |
+| AviationStack API key | Live departure/arrival times by flight number. Free tier: 1000 calls/month. Get at [aviationstack.com](https://aviationstack.com/). Results are cached for 3 hours per flight number to stay well within the free quota. |
+| AeroDataBox RapidAPI key | Live route data by ICAO24 transponder code (~5 min lag). Paid. Get at [rapidapi.com](https://rapidapi.com/) → search AeroDataBox. Takes priority over AviationStack when both are configured. |
 | Manual cache directory | Absolute path to a `.cache` directory in the same format as [closest-plane-app](https://github.com/bairnhard/closest-plane-app). Allows sharing manual flight and aircraft overrides between the two tools. |
 
 ## Data sources and priority
 
-Route data priority (highest wins):
+Route data (departure/arrival times and airports):
 
-1. **Manual flight cache** (`flight-cache.json`) — user-verified ground truth
-2. **AeroDataBox** — live data, ~5 min lag
-3. **ADSBDB** — typical/historical route for known callsigns
-4. **No route** — sensors show `None`/unavailable
+1. **AeroDataBox** — live data by ICAO24, ~5 min lag (paid)
+2. **AviationStack** — live data by flight number, only called when AeroDataBox yields no times (free: 1000/month, cached 3h per flight)
+3. **ADSBDB** — typical/historical route for known callsigns (airports only, no times)
+4. **Local flight cache** (`flight-cache.json`) — user-verified ground truth, applied on top
+5. **OpenSky flights** — last resort, historical ICAO airport codes only, no times
 
-Aircraft identity priority:
+Aircraft identity:
 
-1. **Manual aircraft cache** (`aircraft-cache.json`)
+1. **Local aircraft cache** (`aircraft-cache.json`)
 2. **ADSBDB** — registration, type, model, operator
 3. **AeroDataBox** — registration fallback
 
 ## Honest data boundary
 
-OpenSky live state vectors do not contain departure/destination. These fields are only populated from ADSBDB, AeroDataBox, or manual caches. When unknown, the relevant sensors are unavailable rather than showing guessed data.
+OpenSky live state vectors do not contain departure/destination. Route and timing fields are only populated from ADSBDB, AviationStack, AeroDataBox, or manual caches. When unknown, the relevant sensors are unavailable rather than showing guessed data. Rescue helicopters and general aviation typically have no route data.
 
 ## Automation example
 
