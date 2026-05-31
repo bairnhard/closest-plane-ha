@@ -11,11 +11,11 @@ from typing import Any
 import aiohttp
 
 from .const import (
-    OPENSKY_API,
-    OPENSKY_TOKEN_URL,
+    AIRCRAFT_CATEGORY,
     AIRLINES,
     IATA_TO_ICAO,
-    AIRCRAFT_CATEGORY,
+    OPENSKY_API,
+    OPENSKY_TOKEN_URL,
     POSITION_SOURCE,
 )
 
@@ -112,7 +112,7 @@ def _parse_state(row: list, user_lat: float, user_lon: float) -> dict[str, Any] 
     if len(row) < 17:
         return None
     (
-        icao24, callsign, origin_country, time_position, last_contact,
+        icao24, callsign, origin_country, _time_position, last_contact,
         longitude, latitude, baro_alt, on_ground, velocity, true_track,
         vertical_rate, _sensors, geo_alt, squawk, _spi, position_source_id,
     ) = row[:17]
@@ -205,7 +205,7 @@ async def fetch_closest_raw(
                     _LOGGER.warning("OpenSky states failed: %s", resp.status)
                     return None
                 data = await resp.json()
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _LOGGER.warning("OpenSky states timed out")
         return None
     except Exception as err:

@@ -18,6 +18,7 @@ ignore = [
     "BLE001",  # broad exception catching — intentional in HA integrations for resilience
     "EM101",   # exception string literal — HA convention
     "EM102",   # exception f-string — HA convention
+    "S105",    # hardcoded password — false positive on config key name constants
     "S110",    # try-except-pass — used for best-effort API lookups
     "S311",    # pseudo-random — not used for security here
     "TRY003",  # long exception messages — HA convention

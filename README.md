@@ -168,6 +168,17 @@ ruff check custom_components/        # lint + security
 ruff format custom_components/       # auto-format
 ```
 
+### HACS publishing checklist
+
+Two steps must be done manually in GitHub before HACS validation fully passes:
+
+1. **Add repository topics** — go to the repository page → gear icon next to "About" → add topics:
+   `home-assistant`, `hacs`, `homeassistant-integration`
+
+2. **Add brand icon** — place a 256×256 PNG at `custom_components/closest_plane/brand/icon.png`.
+   Optionally add `icon@2x.png` (512×512) for HiDPI. Any icon editor or
+   [realfavicongenerator.net](https://realfavicongenerator.net) can produce the right size.
+
 ## Relation to closest-plane-app
 
 This integration is a self-contained Python reimplementation of the data pipeline from [closest-plane-app](https://github.com/bairnhard/closest-plane-app). The two share the same JSON cache file format — if you run both on the same machine, point `cache_dir` at the Node.js app's `.cache` directory to share manual enrichment entries.

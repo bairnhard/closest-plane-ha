@@ -10,9 +10,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, CONF_LATITUDE, CONF_LONGITUDE, CONF_RADIUS_KM, CONF_REFRESH_MINUTES
-from .opensky import fetch_closest_raw
+from .const import CONF_LATITUDE, CONF_LONGITUDE, CONF_RADIUS_KM, CONF_REFRESH_MINUTES, DOMAIN
 from .enrichment import enrich_aircraft
+from .opensky import fetch_closest_raw
 
 _LOGGER = logging.getLogger(__name__)
 

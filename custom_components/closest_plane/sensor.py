@@ -246,7 +246,8 @@ class ClosestPlaneSensor(CoordinatorEntity[ClosestPlaneCoordinator], SensorEntit
         if not self.coordinator.data:
             return None
         val = self.coordinator.data.get(self.entity_description.data_key)
-        if self.entity_description.device_class == SensorDeviceClass.TIMESTAMP and isinstance(val, str):
+        is_ts = self.entity_description.device_class == SensorDeviceClass.TIMESTAMP
+        if is_ts and isinstance(val, str):
             try:
                 return datetime.fromisoformat(val.replace("Z", "+00:00"))
             except (ValueError, TypeError):

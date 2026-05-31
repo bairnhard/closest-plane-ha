@@ -1,4 +1,5 @@
 """Enrichment pipeline: ADSBDB, AeroDataBox, AviationStack, local JSON caches, OpenSky flights."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +7,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 import aiohttp
@@ -112,7 +113,7 @@ def _minutes_until(iso: str | None) -> int | None:
         return None
     try:
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-        diff = (dt - datetime.now(timezone.utc)).total_seconds()
+        diff = (dt - datetime.now(datetime.UTC)).total_seconds()
         return max(0, round(diff / 60))
     except Exception:
         return None
@@ -120,12 +121,127 @@ def _minutes_until(iso: str | None) -> int | None:
 
 def _route_cache_keys(flight_number: str | None, callsign: str | None) -> list[str]:
     identifiers = list(dict.fromkeys(x for x in [flight_number, callsign] if x))
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(datetime.UTC).strftime("%Y-%m-%d")
     keys = []
     for ident in identifiers:
         keys.append(f"{ident}-{today}")
         keys.append(ident)
     return keys
+
+
+# ---------------------------------------------------------------------------
+# Apply helpers — one per data source
+# ---------------------------------------------------------------------------
+
+
+def _apply_adsbdb(aircraft: dict, adsbdb: dict) -> dict:
+    ac = adsbdb.get("aircraft") or {}
+    if ac:
+        aircraft["registration"] = aircraft["registration"] or ac.get("registration")
+        aircraft["aircraft_type"] = aircraft["aircraft_type"] or ac.get("icao_type")
+        model = " ".join(filter(None, [ac.get("manufacturer"), ac.get("type")])) or None
+        aircraft["aircraft_model"] = aircraft["aircraft_model"] or model
+        aircraft["registered_owner"] = (
+            aircraft["registered_owner"] or ac.get("registered_owner")
+        )
+        aircraft["confidence"]["aircraft"] = max(
+            aircraft["confidence"].get("aircraft", 0), 0.85
+        )
+        aircraft["sources"].append("adsbdb.aircraft")
+
+    route = adsbdb.get("flightroute") or {}
+    airline = route.get("airline") or adsbdb.get("airline")
+    if airline:
+        aircraft["airline_icao"] = aircraft["airline_icao"] or airline.get("icao")
+        aircraft["airline_iata"] = aircraft["airline_iata"] or airline.get("iata")
+        aircraft["airline"] = aircraft["airline"] or airline.get("name")
+        aircraft["confidence"]["identity"] = max(
+            aircraft["confidence"].get("identity", 0), 0.82
+        )
+
+    origin = route.get("origin") or adsbdb.get("origin")
+    destination = route.get("destination") or adsbdb.get("destination")
+    if origin or destination:
+        if origin and not aircraft.get("departure_airport"):
+            dep = _normalize_adsbdb_airport(origin)
+            aircraft["departure_airport"] = dep
+            aircraft["departure"] = _display_airport(dep)
+        if destination and not aircraft.get("destination_airport"):
+            dst = _normalize_adsbdb_airport(destination)
+            aircraft["destination_airport"] = dst
+            aircraft["destination"] = _display_airport(dst)
+        aircraft["confidence"]["route"] = max(
+            aircraft["confidence"].get("route", 0), 0.72
+        )
+        aircraft["sources"].append("adsbdb.callsign")
+
+    return aircraft
+
+
+def _apply_aerodatabox(aircraft: dict, flight: dict) -> dict:
+    dep_info = flight.get("departure") or {}
+    arr_info = flight.get("arrival") or {}
+    dep_airport = _normalize_aerodatabox_airport(dep_info.get("airport"))
+    dst_airport = _normalize_aerodatabox_airport(arr_info.get("airport"))
+    if dep_airport:
+        aircraft["departure_airport"] = dep_airport
+        aircraft["departure"] = _display_airport(dep_airport)
+        aircraft["scheduled_departure"] = _parse_time(dep_info.get("scheduledTime"))
+        aircraft["actual_departure"] = _parse_time(dep_info.get("actualTime"))
+    if dst_airport:
+        aircraft["destination_airport"] = dst_airport
+        aircraft["destination"] = _display_airport(dst_airport)
+        aircraft["scheduled_arrival"] = _parse_time(arr_info.get("scheduledTime"))
+        aircraft["estimated_arrival"] = _parse_time(arr_info.get("estimatedTime"))
+    airl = flight.get("airline") or {}
+    aircraft["airline"] = airl.get("name") or aircraft.get("airline")
+    aircraft["airline_icao"] = airl.get("icao") or aircraft.get("airline_icao")
+    aircraft["airline_iata"] = airl.get("iata") or aircraft.get("airline_iata")
+    if (flight.get("aircraft") or {}).get("reg"):
+        aircraft["registration"] = aircraft["registration"] or flight["aircraft"]["reg"]
+    if dep_airport or dst_airport:
+        aircraft["confidence"]["route"] = max(
+            aircraft["confidence"].get("route", 0), 0.95
+        )
+        aircraft["sources"].append("aerodatabox")
+    return aircraft
+
+
+def _apply_aviationstack(aircraft: dict, flight: dict) -> dict:
+    dep_info = flight.get("departure") or {}
+    arr_info = flight.get("arrival") or {}
+
+    dep_airport = _normalize_aviationstack_airport(dep_info)
+    arr_airport = _normalize_aviationstack_airport(arr_info)
+
+    if dep_airport and dep_airport.get("iata"):
+        aircraft["departure_airport"] = dep_airport
+        aircraft["departure"] = _display_airport(dep_airport)
+        aircraft["scheduled_departure"] = (
+            aircraft.get("scheduled_departure") or _parse_iso(dep_info.get("scheduled"))
+        )
+        actual = _parse_iso(dep_info.get("actual") or dep_info.get("actual_runway"))
+        if actual:
+            aircraft["actual_departure"] = actual
+
+    if arr_airport and arr_airport.get("iata"):
+        aircraft["destination_airport"] = arr_airport
+        aircraft["destination"] = _display_airport(arr_airport)
+        aircraft["scheduled_arrival"] = (
+            aircraft.get("scheduled_arrival") or _parse_iso(arr_info.get("scheduled"))
+        )
+        estimated = _parse_iso(arr_info.get("estimated") or arr_info.get("estimated_runway"))
+        if estimated:
+            aircraft["estimated_arrival"] = estimated
+
+    airl = flight.get("airline") or {}
+    aircraft["airline"] = aircraft.get("airline") or airl.get("name")
+    aircraft["airline_icao"] = aircraft.get("airline_icao") or airl.get("icao")
+    aircraft["airline_iata"] = aircraft.get("airline_iata") or airl.get("iata")
+
+    aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.92)
+    aircraft["sources"].append("aviationstack")
+    return aircraft
 
 
 def _apply_flight_cache(aircraft: dict, hit: dict) -> dict:
@@ -180,41 +296,104 @@ def _apply_flight_cache(aircraft: dict, hit: dict) -> dict:
     return aircraft
 
 
-def _apply_aviationstack(aircraft: dict, flight: dict) -> dict:
-    dep_info = flight.get("departure") or {}
-    arr_info = flight.get("arrival") or {}
-
-    dep_airport = _normalize_aviationstack_airport(dep_info)
-    arr_airport = _normalize_aviationstack_airport(arr_info)
-
-    if dep_airport and dep_airport.get("iata"):
-        aircraft["departure_airport"] = dep_airport
-        aircraft["departure"] = _display_airport(dep_airport)
-        aircraft["scheduled_departure"] = (
-            aircraft.get("scheduled_departure") or _parse_iso(dep_info.get("scheduled"))
+def _apply_local_cache(aircraft: dict, icao24: str, cache_dir: str) -> dict:
+    ac_cache = _load_json(os.path.join(cache_dir, "aircraft-cache.json"))
+    ac_hit = ac_cache.get(icao24.lower()) or ac_cache.get(icao24.upper())
+    if ac_hit:
+        aircraft["registration"] = (
+            ac_hit.get("registration") or aircraft.get("registration")
         )
-        actual = _parse_iso(dep_info.get("actual") or dep_info.get("actual_runway"))
-        if actual:
-            aircraft["actual_departure"] = actual
-
-    if arr_airport and arr_airport.get("iata"):
-        aircraft["destination_airport"] = arr_airport
-        aircraft["destination"] = _display_airport(arr_airport)
-        aircraft["scheduled_arrival"] = (
-            aircraft.get("scheduled_arrival") or _parse_iso(arr_info.get("scheduled"))
+        aircraft["aircraft_type"] = (
+            ac_hit.get("aircraftType") or aircraft.get("aircraft_type")
         )
-        estimated = _parse_iso(arr_info.get("estimated") or arr_info.get("estimated_runway"))
-        if estimated:
-            aircraft["estimated_arrival"] = estimated
+        aircraft["aircraft_model"] = (
+            ac_hit.get("aircraftModel") or aircraft.get("aircraft_model")
+        )
+        aircraft["registered_owner"] = (
+            ac_hit.get("registeredOwner") or aircraft.get("registered_owner")
+        )
+        aircraft["confidence"]["aircraft"] = max(
+            aircraft["confidence"].get("aircraft", 0), ac_hit.get("confidence", 0.8)
+        )
+        aircraft["sources"].append("local.aircraft-cache")
 
-    airl = flight.get("airline") or {}
-    aircraft["airline"] = aircraft.get("airline") or airl.get("name")
-    aircraft["airline_icao"] = aircraft.get("airline_icao") or airl.get("icao")
-    aircraft["airline_iata"] = aircraft.get("airline_iata") or airl.get("iata")
+    fl_cache = _load_json(os.path.join(cache_dir, "flight-cache.json"))
+    for ck in _route_cache_keys(aircraft.get("flight_number"), aircraft.get("callsign")):
+        if ck in fl_cache:
+            aircraft = _apply_flight_cache(aircraft, fl_cache[ck])
+            break
 
-    aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.92)
-    aircraft["sources"].append("aviationstack")
     return aircraft
+
+
+def _apply_opensky_flights(aircraft: dict, os_flight: dict) -> dict:
+    dep_icao = os_flight.get("estDepartureAirport")
+    arr_icao = os_flight.get("estArrivalAirport")
+    if dep_icao:
+        aircraft["departure_airport"] = {"icao": dep_icao}
+        aircraft["departure"] = dep_icao
+    if arr_icao:
+        aircraft["destination_airport"] = {"icao": arr_icao}
+        aircraft["destination"] = arr_icao
+    if dep_icao or arr_icao:
+        aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.4)
+        aircraft["sources"].append("opensky.flights")
+    return aircraft
+
+
+def _derive_timing(aircraft: dict) -> dict:
+    departed_at = aircraft.get("actual_departure") or aircraft.get("scheduled_departure")
+    if departed_at and aircraft.get("elapsed_minutes") is None:
+        try:
+            dep_dt = datetime.fromisoformat(departed_at.replace("Z", "+00:00"))
+            elapsed = round((datetime.now(datetime.UTC) - dep_dt).total_seconds() / 60)
+            if elapsed > 0:
+                aircraft["elapsed_minutes"] = elapsed
+        except Exception:
+            pass
+
+    sched_dep = aircraft.get("scheduled_departure")
+    sched_arr = aircraft.get("scheduled_arrival")
+    if sched_dep and sched_arr and aircraft.get("total_minutes") is None:
+        try:
+            dep_dt = datetime.fromisoformat(sched_dep.replace("Z", "+00:00"))
+            arr_dt = datetime.fromisoformat(sched_arr.replace("Z", "+00:00"))
+            total = round((arr_dt - dep_dt).total_seconds() / 60)
+            if total > 0:
+                aircraft["total_minutes"] = total
+        except Exception:
+            pass
+
+    if aircraft.get("remaining_minutes") is None:
+        aircraft["remaining_minutes"] = _minutes_until(
+            aircraft.get("estimated_arrival") or aircraft.get("scheduled_arrival")
+        )
+
+    aircraft["departure_time"] = (
+        aircraft.get("actual_departure") or aircraft.get("scheduled_departure")
+    )
+    aircraft["arrival_time"] = (
+        aircraft.get("estimated_arrival") or aircraft.get("scheduled_arrival")
+    )
+    return aircraft
+
+
+def _derive_logo(aircraft: dict) -> dict:
+    if aircraft.get("airline_logo_url"):
+        return aircraft
+    iata = aircraft.get("airline_iata")
+    icao = aircraft.get("airline_icao")
+    code = iata or icao
+    if code:
+        aircraft["airline_logo_url"] = (
+            f"https://images.kiwi.com/airlines/64/{code}.png"
+        )
+    return aircraft
+
+
+# ---------------------------------------------------------------------------
+# API fetch helpers
+# ---------------------------------------------------------------------------
 
 
 async def _adsbdb(
@@ -289,7 +468,11 @@ async def _aerodatabox(
                     data = await resp.json()
                     flights = data if isinstance(data, list) else data.get("flights", [])
                     active = next(
-                        (f for f in flights if f.get("status") in ("EnRoute", "En Route", "Departed")),
+                        (
+                            f
+                            for f in flights
+                            if f.get("status") in ("EnRoute", "En Route", "Departed")
+                        ),
                         flights[0] if flights else None,
                     )
                     return _put(key, active, 300)
@@ -318,9 +501,12 @@ async def _aviationstack(
                     return _put(key, None, 300)
                 data = await resp.json()
                 flights = (data or {}).get("data") or []
-                # Prefer active/en-route, fall back to most recent
                 active = next(
-                    (f for f in flights if f.get("flight_status") in ("active", "landed")),
+                    (
+                        f
+                        for f in flights
+                        if f.get("flight_status") in ("active", "landed")
+                    ),
                     flights[0] if flights else None,
                 )
                 return _put(key, active, 10800)
@@ -332,7 +518,7 @@ async def _aviationstack(
 async def _opensky_flights(
     session: aiohttp.ClientSession, icao24: str, config: dict
 ) -> dict | None:
-    """Last-resort: OpenSky historical flights — gives departure/arrival airports only, no live times."""
+    """Last resort: OpenSky historical flights — airports only, no live times."""
     key = f"opensky_flights:{icao24.lower()}"
     cached = _get(key)
     if cached is not None:
@@ -340,7 +526,6 @@ async def _opensky_flights(
 
     now = int(time.time())
     params = {"icao24": icao24.lower(), "begin": now - 86400, "end": now}
-
     client_id = config.get("opensky_client_id", "")
     client_secret = config.get("opensky_client_secret", "")
     auth = aiohttp.BasicAuth(client_id, client_secret) if client_id and client_secret else None
@@ -364,6 +549,11 @@ async def _opensky_flights(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Main pipeline
+# ---------------------------------------------------------------------------
+
+
 async def enrich_aircraft(
     session: aiohttp.ClientSession,
     aircraft: dict[str, Any],
@@ -376,71 +566,17 @@ async def enrich_aircraft(
     # 1. ADSBDB — aircraft identity + typical route
     adsbdb = await _adsbdb(session, icao24, callsign)
     if adsbdb:
-        ac = adsbdb.get("aircraft") or {}
-        if ac:
-            aircraft["registration"] = aircraft["registration"] or ac.get("registration")
-            aircraft["aircraft_type"] = aircraft["aircraft_type"] or ac.get("icao_type")
-            model = " ".join(filter(None, [ac.get("manufacturer"), ac.get("type")])) or None
-            aircraft["aircraft_model"] = aircraft["aircraft_model"] or model
-            aircraft["registered_owner"] = aircraft["registered_owner"] or ac.get("registered_owner")
-            aircraft["confidence"]["aircraft"] = max(aircraft["confidence"].get("aircraft", 0), 0.85)
-            aircraft["sources"].append("adsbdb.aircraft")
-
-        route = adsbdb.get("flightroute") or {}
-        airline = route.get("airline") or adsbdb.get("airline")
-        if airline:
-            aircraft["airline_icao"] = aircraft["airline_icao"] or airline.get("icao")
-            aircraft["airline_iata"] = aircraft["airline_iata"] or airline.get("iata")
-            aircraft["airline"] = aircraft["airline"] or airline.get("name")
-            aircraft["confidence"]["identity"] = max(aircraft["confidence"].get("identity", 0), 0.82)
-
-        origin = route.get("origin") or adsbdb.get("origin")
-        destination = route.get("destination") or adsbdb.get("destination")
-        if origin or destination:
-            if origin and not aircraft.get("departure_airport"):
-                dep = _normalize_adsbdb_airport(origin)
-                aircraft["departure_airport"] = dep
-                aircraft["departure"] = _display_airport(dep)
-            if destination and not aircraft.get("destination_airport"):
-                dst = _normalize_adsbdb_airport(destination)
-                aircraft["destination_airport"] = dst
-                aircraft["destination"] = _display_airport(dst)
-            aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.72)
-            aircraft["sources"].append("adsbdb.callsign")
+        aircraft = _apply_adsbdb(aircraft, adsbdb)
 
     # 2. AeroDataBox — live route by ICAO24 (paid, highest quality)
     adb_key = config.get("aerodatabox_api_key", "")
     if adb_key:
         flight = await _aerodatabox(session, icao24, adb_key)
         if flight:
-            dep_info = flight.get("departure") or {}
-            arr_info = flight.get("arrival") or {}
-            dep_airport = _normalize_aerodatabox_airport(dep_info.get("airport"))
-            dst_airport = _normalize_aerodatabox_airport(arr_info.get("airport"))
-            if dep_airport:
-                aircraft["departure_airport"] = dep_airport
-                aircraft["departure"] = _display_airport(dep_airport)
-                aircraft["scheduled_departure"] = _parse_time(dep_info.get("scheduledTime"))
-                aircraft["actual_departure"] = _parse_time(dep_info.get("actualTime"))
-            if dst_airport:
-                aircraft["destination_airport"] = dst_airport
-                aircraft["destination"] = _display_airport(dst_airport)
-                aircraft["scheduled_arrival"] = _parse_time(arr_info.get("scheduledTime"))
-                aircraft["estimated_arrival"] = _parse_time(arr_info.get("estimatedTime"))
-            airl = flight.get("airline") or {}
-            aircraft["airline"] = airl.get("name") or aircraft.get("airline")
-            aircraft["airline_icao"] = airl.get("icao") or aircraft.get("airline_icao")
-            aircraft["airline_iata"] = airl.get("iata") or aircraft.get("airline_iata")
-            if (flight.get("aircraft") or {}).get("reg"):
-                aircraft["registration"] = aircraft["registration"] or flight["aircraft"]["reg"]
-            if dep_airport or dst_airport:
-                aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.95)
-                aircraft["sources"].append("aerodatabox")
+            aircraft = _apply_aerodatabox(aircraft, flight)
 
-    # 3. AviationStack — live route by flight number (free tier, 1000 calls/month)
-    # Only called when we still lack departure/arrival time data after AeroDataBox.
-    # Cache TTL is 3 hours, so the same flight number re-uses the cached result across
-    # many refresh cycles instead of burning API quota on every poll.
+    # 3. AviationStack — live route by flight number (free, 1000/month)
+    # Only called when AeroDataBox yielded no time data; cached 3h per flight number.
     avs_key = config.get("aviationstack_api_key", "")
     has_times = aircraft.get("scheduled_departure") or aircraft.get("scheduled_arrival")
     if avs_key and aircraft.get("flight_number") and not has_times:
@@ -448,90 +584,18 @@ async def enrich_aircraft(
         if flight:
             aircraft = _apply_aviationstack(aircraft, flight)
 
-    # 4. Local JSON caches (compatible with closest-plane-app format)
+    # 4. Local JSON caches
     cache_dir = config.get("cache_dir", "")
     if cache_dir and os.path.isdir(cache_dir):
-        ac_cache = _load_json(os.path.join(cache_dir, "aircraft-cache.json"))
-        ac_hit = ac_cache.get(icao24.lower()) or ac_cache.get(icao24.upper())
-        if ac_hit:
-            aircraft["registration"] = ac_hit.get("registration") or aircraft.get("registration")
-            aircraft["aircraft_type"] = ac_hit.get("aircraftType") or aircraft.get("aircraft_type")
-            aircraft["aircraft_model"] = ac_hit.get("aircraftModel") or aircraft.get("aircraft_model")
-            aircraft["registered_owner"] = ac_hit.get("registeredOwner") or aircraft.get("registered_owner")
-            aircraft["confidence"]["aircraft"] = max(
-                aircraft["confidence"].get("aircraft", 0), ac_hit.get("confidence", 0.8)
-            )
-            aircraft["sources"].append("local.aircraft-cache")
+        aircraft = _apply_local_cache(aircraft, icao24, cache_dir)
 
-        fl_cache = _load_json(os.path.join(cache_dir, "flight-cache.json"))
-        for ck in _route_cache_keys(aircraft.get("flight_number"), aircraft.get("callsign")):
-            if ck in fl_cache:
-                aircraft = _apply_flight_cache(aircraft, fl_cache[ck])
-                break
-
-    # 5. OpenSky flights — last resort: ICAO airports only, historical data
+    # 5. OpenSky flights — last resort, historical ICAO airports only
     if not aircraft.get("departure_airport") and not aircraft.get("destination_airport"):
         os_flight = await _opensky_flights(session, icao24, config)
         if os_flight:
-            dep_icao = os_flight.get("estDepartureAirport")
-            arr_icao = os_flight.get("estArrivalAirport")
-            if dep_icao:
-                aircraft["departure_airport"] = {"icao": dep_icao}
-                aircraft["departure"] = dep_icao
-            if arr_icao:
-                aircraft["destination_airport"] = {"icao": arr_icao}
-                aircraft["destination"] = arr_icao
-            if dep_icao or arr_icao:
-                aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.4)
-                aircraft["sources"].append("opensky.flights")
+            aircraft = _apply_opensky_flights(aircraft, os_flight)
 
-    # 6. Derive timing from timestamps when enrichment didn't supply them
-    departed_at = aircraft.get("actual_departure") or aircraft.get("scheduled_departure")
-    if departed_at and aircraft.get("elapsed_minutes") is None:
-        try:
-            dep_dt = datetime.fromisoformat(departed_at.replace("Z", "+00:00"))
-            elapsed = round((datetime.now(timezone.utc) - dep_dt).total_seconds() / 60)
-            if elapsed > 0:
-                aircraft["elapsed_minutes"] = elapsed
-        except Exception:
-            pass
-
-    sched_dep = aircraft.get("scheduled_departure")
-    sched_arr = aircraft.get("scheduled_arrival")
-    if sched_dep and sched_arr and aircraft.get("total_minutes") is None:
-        try:
-            dep_dt = datetime.fromisoformat(sched_dep.replace("Z", "+00:00"))
-            arr_dt = datetime.fromisoformat(sched_arr.replace("Z", "+00:00"))
-            total = round((arr_dt - dep_dt).total_seconds() / 60)
-            if total > 0:
-                aircraft["total_minutes"] = total
-        except Exception:
-            pass
-
-    if aircraft.get("remaining_minutes") is None:
-        aircraft["remaining_minutes"] = _minutes_until(
-            aircraft.get("estimated_arrival") or aircraft.get("scheduled_arrival")
-        )
-
-    # Best-available departure/arrival: actual > scheduled
-    aircraft["departure_time"] = (
-        aircraft.get("actual_departure") or aircraft.get("scheduled_departure")
-    )
-    aircraft["arrival_time"] = (
-        aircraft.get("estimated_arrival") or aircraft.get("scheduled_arrival")
-    )
-
-    # Airline logo — IATA preferred (Kiwi.com), ICAO as fallback
-    if not aircraft.get("airline_logo_url"):
-        iata = aircraft.get("airline_iata")
-        icao = aircraft.get("airline_icao")
-        if iata:
-            aircraft["airline_logo_url"] = (
-                f"https://images.kiwi.com/airlines/64/{iata}.png"
-            )
-        elif icao:
-            aircraft["airline_logo_url"] = (
-                f"https://images.kiwi.com/airlines/64/{icao}.png"
-            )
+    aircraft = _derive_timing(aircraft)
+    aircraft = _derive_logo(aircraft)
 
     return aircraft
