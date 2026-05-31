@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -156,6 +157,40 @@ SENSORS: tuple[ClosestPlaneSensorDescription, ...] = (
         name="Squawk",
         icon="mdi:radio",
     ),
+    ClosestPlaneSensorDescription(
+        key="airline_logo_url",
+        data_key="airline_logo_url",
+        name="Airline logo URL",
+        icon="mdi:image",
+    ),
+    ClosestPlaneSensorDescription(
+        key="scheduled_departure",
+        data_key="scheduled_departure",
+        name="Scheduled departure",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:clock-out",
+    ),
+    ClosestPlaneSensorDescription(
+        key="actual_departure",
+        data_key="actual_departure",
+        name="Actual departure",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:airplane-takeoff",
+    ),
+    ClosestPlaneSensorDescription(
+        key="scheduled_arrival",
+        data_key="scheduled_arrival",
+        name="Scheduled arrival",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:clock-in",
+    ),
+    ClosestPlaneSensorDescription(
+        key="estimated_arrival",
+        data_key="estimated_arrival",
+        name="Estimated arrival",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:airplane-landing",
+    ),
 )
 
 
@@ -196,7 +231,13 @@ class ClosestPlaneSensor(CoordinatorEntity[ClosestPlaneCoordinator], SensorEntit
     def native_value(self) -> Any:
         if not self.coordinator.data:
             return None
-        return self.coordinator.data.get(self.entity_description.data_key)
+        val = self.coordinator.data.get(self.entity_description.data_key)
+        if self.entity_description.device_class == SensorDeviceClass.TIMESTAMP and isinstance(val, str):
+            try:
+                return datetime.fromisoformat(val.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                return None
+        return val
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

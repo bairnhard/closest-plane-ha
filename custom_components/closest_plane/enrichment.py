@@ -362,4 +362,11 @@ async def enrich_aircraft(
             aircraft.get("estimated_arrival") or aircraft.get("scheduled_arrival")
         )
 
+    # Derive airline logo URL from IATA code
+    iata = aircraft.get("airline_iata")
+    if iata and not aircraft.get("airline_logo_url"):
+        aircraft["airline_logo_url"] = (
+            f"https://content.airhex.com/content/logos/airlines_{iata}_100_50_r.png"
+        )
+
     return aircraft

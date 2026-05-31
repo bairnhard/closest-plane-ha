@@ -99,7 +99,7 @@ def normalize_callsign(raw: str | None) -> dict[str, Any]:
         airline_icao = IATA_TO_ICAO[prefix]
         airline = AIRLINES.get(airline_icao)
 
-    flight_number = f"{airline['iata']}{suffix}" if airline and airline.get("iata") else cs
+    flight_number = f"{airline['iata']} {suffix}" if airline and airline.get("iata") else cs
     return {
         "callsign": cs,
         "airline_icao": airline_icao,
@@ -162,6 +162,7 @@ def _parse_state(row: list, user_lat: float, user_lon: float) -> dict[str, Any] 
         "elapsed_minutes": None,
         "remaining_minutes": None,
         "total_minutes": None,
+        "airline_logo_url": None,
         "confidence": {
             "identity": 0.88 if identity["airline"] else (0.55 if identity["callsign"] else 0),
             "aircraft": 0,
