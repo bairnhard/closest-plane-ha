@@ -1,4 +1,5 @@
 """DataUpdateCoordinator for Closest Plane."""
+
 from __future__ import annotations
 
 import asyncio

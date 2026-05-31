@@ -1,4 +1,5 @@
 """Sensor platform for Closest Plane."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from .coordinator import ClosestPlaneCoordinator
 @dataclass(frozen=True, kw_only=True)
 class ClosestPlaneSensorDescription(SensorEntityDescription):
     """Extends SensorEntityDescription with the data key to read."""
+
     data_key: str = ""
     extra_attributes_key: bool = False
 

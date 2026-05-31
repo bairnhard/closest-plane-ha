@@ -1,4 +1,5 @@
 """Constants for the Closest Plane integration."""
+
 from __future__ import annotations
 
 DOMAIN = "closest_plane"
@@ -19,8 +20,7 @@ DEFAULT_REFRESH_MINUTES = 2
 
 OPENSKY_API = "https://opensky-network.org/api"
 OPENSKY_TOKEN_URL = (
-    "https://auth.opensky-network.org/auth/realms/opensky-network"
-    "/protocol/openid-connect/token"
+    "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
 )
 ADSBDB_API = "https://api.adsbdb.com/v0"
 AERODATABOX_API = "https://aerodatabox.p.rapidapi.com"
@@ -84,9 +84,7 @@ AIRLINES: dict[str, dict] = {
     "BGS": {"name": "German Federal Police", "iata": None},
 }
 
-IATA_TO_ICAO: dict[str, str] = {
-    v["iata"]: k for k, v in AIRLINES.items() if v.get("iata")
-}
+IATA_TO_ICAO: dict[str, str] = {v["iata"]: k for k, v in AIRLINES.items() if v.get("iata")}
 
 AIRCRAFT_CATEGORY: dict[int, str] = {
     0: "No category information",

@@ -141,12 +141,8 @@ def _apply_adsbdb(aircraft: dict, adsbdb: dict) -> dict:
         aircraft["aircraft_type"] = aircraft["aircraft_type"] or ac.get("icao_type")
         model = " ".join(filter(None, [ac.get("manufacturer"), ac.get("type")])) or None
         aircraft["aircraft_model"] = aircraft["aircraft_model"] or model
-        aircraft["registered_owner"] = (
-            aircraft["registered_owner"] or ac.get("registered_owner")
-        )
-        aircraft["confidence"]["aircraft"] = max(
-            aircraft["confidence"].get("aircraft", 0), 0.85
-        )
+        aircraft["registered_owner"] = aircraft["registered_owner"] or ac.get("registered_owner")
+        aircraft["confidence"]["aircraft"] = max(aircraft["confidence"].get("aircraft", 0), 0.85)
         aircraft["sources"].append("adsbdb.aircraft")
 
     route = adsbdb.get("flightroute") or {}
@@ -155,9 +151,7 @@ def _apply_adsbdb(aircraft: dict, adsbdb: dict) -> dict:
         aircraft["airline_icao"] = aircraft["airline_icao"] or airline.get("icao")
         aircraft["airline_iata"] = aircraft["airline_iata"] or airline.get("iata")
         aircraft["airline"] = aircraft["airline"] or airline.get("name")
-        aircraft["confidence"]["identity"] = max(
-            aircraft["confidence"].get("identity", 0), 0.82
-        )
+        aircraft["confidence"]["identity"] = max(aircraft["confidence"].get("identity", 0), 0.82)
 
     origin = route.get("origin") or adsbdb.get("origin")
     destination = route.get("destination") or adsbdb.get("destination")
@@ -170,9 +164,7 @@ def _apply_adsbdb(aircraft: dict, adsbdb: dict) -> dict:
             dst = _normalize_adsbdb_airport(destination)
             aircraft["destination_airport"] = dst
             aircraft["destination"] = _display_airport(dst)
-        aircraft["confidence"]["route"] = max(
-            aircraft["confidence"].get("route", 0), 0.72
-        )
+        aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.72)
         aircraft["sources"].append("adsbdb.callsign")
 
     return aircraft
@@ -200,9 +192,7 @@ def _apply_aerodatabox(aircraft: dict, flight: dict) -> dict:
     if (flight.get("aircraft") or {}).get("reg"):
         aircraft["registration"] = aircraft["registration"] or flight["aircraft"]["reg"]
     if dep_airport or dst_airport:
-        aircraft["confidence"]["route"] = max(
-            aircraft["confidence"].get("route", 0), 0.95
-        )
+        aircraft["confidence"]["route"] = max(aircraft["confidence"].get("route", 0), 0.95)
         aircraft["sources"].append("aerodatabox")
     return aircraft
 
@@ -217,8 +207,8 @@ def _apply_aviationstack(aircraft: dict, flight: dict) -> dict:
     if dep_airport and dep_airport.get("iata"):
         aircraft["departure_airport"] = dep_airport
         aircraft["departure"] = _display_airport(dep_airport)
-        aircraft["scheduled_departure"] = (
-            aircraft.get("scheduled_departure") or _parse_iso(dep_info.get("scheduled"))
+        aircraft["scheduled_departure"] = aircraft.get("scheduled_departure") or _parse_iso(
+            dep_info.get("scheduled")
         )
         actual = _parse_iso(dep_info.get("actual") or dep_info.get("actual_runway"))
         if actual:
@@ -227,8 +217,8 @@ def _apply_aviationstack(aircraft: dict, flight: dict) -> dict:
     if arr_airport and arr_airport.get("iata"):
         aircraft["destination_airport"] = arr_airport
         aircraft["destination"] = _display_airport(arr_airport)
-        aircraft["scheduled_arrival"] = (
-            aircraft.get("scheduled_arrival") or _parse_iso(arr_info.get("scheduled"))
+        aircraft["scheduled_arrival"] = aircraft.get("scheduled_arrival") or _parse_iso(
+            arr_info.get("scheduled")
         )
         estimated = _parse_iso(arr_info.get("estimated") or arr_info.get("estimated_runway"))
         if estimated:
@@ -300,17 +290,11 @@ def _apply_local_cache(aircraft: dict, icao24: str, cache_dir: str) -> dict:
     ac_cache = _load_json(os.path.join(cache_dir, "aircraft-cache.json"))
     ac_hit = ac_cache.get(icao24.lower()) or ac_cache.get(icao24.upper())
     if ac_hit:
-        aircraft["registration"] = (
-            ac_hit.get("registration") or aircraft.get("registration")
-        )
-        aircraft["aircraft_type"] = (
-            ac_hit.get("aircraftType") or aircraft.get("aircraft_type")
-        )
-        aircraft["aircraft_model"] = (
-            ac_hit.get("aircraftModel") or aircraft.get("aircraft_model")
-        )
-        aircraft["registered_owner"] = (
-            ac_hit.get("registeredOwner") or aircraft.get("registered_owner")
+        aircraft["registration"] = ac_hit.get("registration") or aircraft.get("registration")
+        aircraft["aircraft_type"] = ac_hit.get("aircraftType") or aircraft.get("aircraft_type")
+        aircraft["aircraft_model"] = ac_hit.get("aircraftModel") or aircraft.get("aircraft_model")
+        aircraft["registered_owner"] = ac_hit.get("registeredOwner") or aircraft.get(
+            "registered_owner"
         )
         aircraft["confidence"]["aircraft"] = max(
             aircraft["confidence"].get("aircraft", 0), ac_hit.get("confidence", 0.8)
@@ -369,11 +353,11 @@ def _derive_timing(aircraft: dict) -> dict:
             aircraft.get("estimated_arrival") or aircraft.get("scheduled_arrival")
         )
 
-    aircraft["departure_time"] = (
-        aircraft.get("actual_departure") or aircraft.get("scheduled_departure")
+    aircraft["departure_time"] = aircraft.get("actual_departure") or aircraft.get(
+        "scheduled_departure"
     )
-    aircraft["arrival_time"] = (
-        aircraft.get("estimated_arrival") or aircraft.get("scheduled_arrival")
+    aircraft["arrival_time"] = aircraft.get("estimated_arrival") or aircraft.get(
+        "scheduled_arrival"
     )
     return aircraft
 
@@ -385,9 +369,7 @@ def _derive_logo(aircraft: dict) -> dict:
     icao = aircraft.get("airline_icao")
     code = iata or icao
     if code:
-        aircraft["airline_logo_url"] = (
-            f"https://images.kiwi.com/airlines/64/{code}.png"
-        )
+        aircraft["airline_logo_url"] = f"https://images.kiwi.com/airlines/64/{code}.png"
     return aircraft
 
 
@@ -396,9 +378,7 @@ def _derive_logo(aircraft: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def _adsbdb(
-    session: aiohttp.ClientSession, icao24: str, callsign: str | None
-) -> dict | None:
+async def _adsbdb(session: aiohttp.ClientSession, icao24: str, callsign: str | None) -> dict | None:
     mode_s = icao24.upper()
     norm_cs = callsign.upper() if callsign else None
 
@@ -444,9 +424,7 @@ async def _adsbdb(
     return None
 
 
-async def _aerodatabox(
-    session: aiohttp.ClientSession, icao24: str, api_key: str
-) -> dict | None:
+async def _aerodatabox(session: aiohttp.ClientSession, icao24: str, api_key: str) -> dict | None:
     key = f"aerodatabox:{icao24.lower()}"
     cached = _get(key)
     if cached is not None:
@@ -502,11 +480,7 @@ async def _aviationstack(
                 data = await resp.json()
                 flights = (data or {}).get("data") or []
                 active = next(
-                    (
-                        f
-                        for f in flights
-                        if f.get("flight_status") in ("active", "landed")
-                    ),
+                    (f for f in flights if f.get("flight_status") in ("active", "landed")),
                     flights[0] if flights else None,
                 )
                 return _put(key, active, 10800)

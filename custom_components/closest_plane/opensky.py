@@ -1,4 +1,5 @@
 """OpenSky Network API client."""
+
 from __future__ import annotations
 
 import asyncio
@@ -30,9 +31,7 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlon = math.radians(lon2 - lon1)
     a = (
         math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     )
     return 2 * R * math.asin(math.sqrt(a))
 
@@ -112,9 +111,23 @@ def _parse_state(row: list, user_lat: float, user_lon: float) -> dict[str, Any] 
     if len(row) < 17:
         return None
     (
-        icao24, callsign, origin_country, _time_position, last_contact,
-        longitude, latitude, baro_alt, on_ground, velocity, true_track,
-        vertical_rate, _sensors, geo_alt, squawk, _spi, position_source_id,
+        icao24,
+        callsign,
+        origin_country,
+        _time_position,
+        last_contact,
+        longitude,
+        latitude,
+        baro_alt,
+        on_ground,
+        velocity,
+        true_track,
+        vertical_rate,
+        _sensors,
+        geo_alt,
+        squawk,
+        _spi,
+        position_source_id,
     ) = row[:17]
     category_id = row[17] if len(row) > 17 else None
 
