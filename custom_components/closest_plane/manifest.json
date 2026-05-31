@@ -1,7 +1,8 @@
 {
   "domain": "closest_plane",
   "name": "Closest Plane",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "homeassistant": "2024.2.0",
   "documentation": "https://github.com/bairnhard/closest-plane-ha",
   "issue_tracker": "https://github.com/bairnhard/closest-plane-ha/issues",
   "requirements": [],

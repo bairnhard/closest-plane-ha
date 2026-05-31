@@ -149,6 +149,25 @@ automation:
             {% endif %}
 ```
 
+## Development
+
+CI runs three checks on every push and pull request (see `.github/workflows/validate.yml`):
+
+| Check | Tool | What it catches |
+|---|---|---|
+| Lint & security | `ruff check` | Style, bugs, complexity, and security issues (covers bandit ruleset) |
+| Formatting | `ruff format --check` | Consistent code style |
+| HA validation | `hassfest` | Manifest, translations, and integration structure |
+| HACS validation | `hacs/action` | HACS compatibility |
+
+Run checks locally before pushing:
+
+```bash
+pip install ruff
+ruff check custom_components/        # lint + security
+ruff format custom_components/       # auto-format
+```
+
 ## Relation to closest-plane-app
 
 This integration is a self-contained Python reimplementation of the data pipeline from [closest-plane-app](https://github.com/bairnhard/closest-plane-app). The two share the same JSON cache file format — if you run both on the same machine, point `cache_dir` at the Node.js app's `.cache` directory to share manual enrichment entries.

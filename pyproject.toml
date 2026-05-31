@@ -1,0 +1,34 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "I",    # isort
+    "C90",  # mccabe complexity
+    "S",    # bandit (security)
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "BLE001",  # broad exception catching — intentional in HA integrations for resilience
+    "EM101",   # exception string literal — HA convention
+    "EM102",   # exception f-string — HA convention
+    "S110",    # try-except-pass — used for best-effort API lookups
+    "S311",    # pseudo-random — not used for security here
+    "TRY003",  # long exception messages — HA convention
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert is fine in tests
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
